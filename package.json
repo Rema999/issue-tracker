@@ -4,22 +4,32 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "relay-compiler && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "relay": "relay-compiler",
+    "relay:watch": "relay-compiler --watch",
+    "fetch-schema": "node scripts/fetch-schema.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.104.1",
+    "graphql": "^16.13.2",
     "next": "16.2.4",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-relay": "^20.1.1",
+    "relay-runtime": "^20.1.1",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "babel-plugin-relay": "^20.1.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "relay-compiler": "^20.1.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
