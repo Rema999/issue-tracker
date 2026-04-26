@@ -1,20 +1,102 @@
 # Issue Tracker
 
-A carefully structured issue tracker built for a senior frontend home assignment. Stack: **Next.js 16 (App Router)**, **Relay**, **Supabase (pg\_graphql)**, **TypeScript (strict)**, and **Tailwind CSS**.
+A carefully structured frontend home assignment built with Next.js App Router, Relay, and Supabase's `pg_graphql` extension. The project demonstrates fragment co-location, cursor-based pagination, real-time list updates, and the compatibility work required to run Relay against a Supabase GraphQL backend.
+
+**Live demo:** https://issue-tracker-sigma-one.vercel.app/issues  
+**Repository:** https://github.com/Rema999/issue-tracker.git
 
 ---
 
-## Features
+## Implemented Requirements
 
-- **Issue list** with multi-select filters (status, priority, labels) and cursor-based pagination
-- **Real-time updates** via Supabase Realtime — status, label, and other changes appear across tabs without a page refresh
-- **Issue detail** with inline editing of title, description, status, priority, assignee, and labels — all changes reflect immediately (local-state optimistic UI)
-- **Comment thread** with cursor-based pagination and live append after posting
-- **Co-located Relay fragments** — every section of the detail page owns its data requirements; no monolithic top-level query
+| Requirement | Status |
+|---|---|
+| Issue list | ✓ |
+| Filter by status (multi-select) | ✓ |
+| Filter by priority (multi-select) | ✓ |
+| Filter by label (multi-select) | ✓ client-side |
+| Cursor-based pagination for issues | ✓ `usePaginationFragment` + Load more |
+| Issue detail page | ✓ |
+| Inline edit: title | ✓ click-to-edit, Enter/Esc |
+| Inline edit: description | ✓ click-to-edit, ⌘↵ to save |
+| Inline edit: status | ✓ dropdown, immediate feedback |
+| Inline edit: priority | ✓ dropdown, immediate feedback |
+| Inline edit: assignee | ✓ dropdown |
+| Inline edit: labels | ✓ multi-toggle dropdown |
+| Optimistic UI with rollback | ✓ local state + `onError` revert |
+| Comments with cursor-based pagination | ✓ `usePaginationFragment`, oldest-first + load earlier |
+| Real-time issue list updates | ✓ Supabase Realtime subscription |
+| Relay fragment co-location | ✓ per-section fragments on detail page |
+
+> **Label filter note:** label filtering runs client-side. All issues are fetched; the label filter is applied in JS. See Trade-offs for why and what the server-side approach looks like.
 
 ---
 
-## Setup
+## Tech Stack
+
+| | |
+|---|---|
+| Framework | Next.js 16.2.4, App Router |
+| Data layer | Relay 20.1.1 (`react-relay`, `relay-runtime`, `relay-compiler`) |
+| Backend | Supabase — `pg_graphql` for GraphQL, Supabase Realtime for live updates |
+| Language | TypeScript 5, strict mode |
+| Styling | Tailwind CSS v4 |
+| Zod | Installed per spec; intended for filter input validation (not yet wired up — see Trade-offs) |
+
+---
+
+## Project Structure
+
+```
+issue-tracker/
+├── relay.config.js             # nodeInterfaceIdField: 'nodeId', nodeInterfaceIdVariableName: 'nodeId'
+├── schema.graphql              # Committed pg_graphql SDL; regenerate with npm run fetch-schema
+├── graphql/                    # Relay compiler source — never imported at runtime
+│   ├── IssueList.ts            # IssueListQuery, IssueList_query fragment, IssueListStatusMutation
+│   ├── IssueDetail.ts          # IssueDetailQuery, IssueDetailContent_issue fragment
+│   ├── IssueHeader.ts          # IssueHeader_issue, Title / Priority / Status mutations
+│   ├── IssueDescription.ts     # IssueDescription_issue, IssueDescriptionMutation
+│   ├── IssueSidebar.ts         # IssueSidebar_issue, Assignee / Label mutations, user/label queries
+│   ├── CommentThread.ts        # CommentThread_query (on Query), CommentThread_comment
+│   ├── CommentForm.ts          # CommentFormMutation
+│   └── IssueListItem.ts        # IssueListItem_issue fragment
+├── lib/
+│   ├── relay/
+│   │   ├── network.ts          # fetchGraphQL + inlineAllFragments + normalizeTypenames
+│   │   └── environment.ts      # Relay Environment singleton (client) / fresh instance (server)
+│   └── supabase.ts             # Supabase JS client (Realtime only; GraphQL goes through Relay)
+├── components/
+│   ├── providers/
+│   │   ├── RelayProvider.tsx
+│   │   └── ToastProvider.tsx
+│   ├── issues/
+│   │   ├── IssueList.tsx       # Root query, Realtime subscription, pagination, client-side label filter
+│   │   ├── IssueListItem.tsx   # Row component; local status state for immediate feedback
+│   │   ├── IssueFilters.tsx    # Status / priority / label dropdowns (HTML <details>, no JS state)
+│   │   ├── IssueDetail.tsx     # Suspense boundary, Realtime subscription (fetchKey strategy)
+│   │   ├── IssueHeader.tsx     # Title / status / priority editors; local state + fragment sync
+│   │   ├── IssueDescription.tsx# Description editor; local state + fragment sync
+│   │   ├── IssueSidebar.tsx    # Assignee / labels editors; local state + fragment sync
+│   │   ├── CommentThread.tsx   # Paginated comments + local-append after post
+│   │   └── CommentForm.tsx     # Comment mutation
+│   └── ui/                     # StatusBadge, PriorityBadge, Avatar, Skeleton
+├── hooks/
+│   └── useToast.ts
+├── scripts/
+│   ├── fetch-schema.js         # Introspection → schema.graphql (buildClientSchema + printSchema)
+│   └── seed.sql                # Test data
+├── app/
+│   ├── layout.tsx              # RelayProvider + ToastProvider + nav shell
+│   ├── page.tsx                # Redirect → /issues
+│   └── issues/
+│       ├── page.tsx            # Issue list page (force-dynamic)
+│       └── [id]/page.tsx       # Issue detail page
+└── __generated__/              # Relay compiler output — do not edit manually
+```
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
@@ -29,16 +111,24 @@ cd issue-tracker
 npm install
 ```
 
-### 2. Configure environment
+### 2. Environment variables
+
+Copy the example and fill in your values:
 
 ```bash
 cp .env.local.example .env.local
-# Edit .env.local and fill in your Supabase project URL and anon key
 ```
 
-### 3. Create the database schema
+```
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
 
-Run the following SQL in **Supabase Dashboard → SQL Editor**:
+The GraphQL endpoint (`/graphql/v1`) is derived from `NEXT_PUBLIC_SUPABASE_URL` at runtime — no separate `GRAPHQL_URL` variable is needed.
+
+### 3. Supabase: create tables
+
+Run in **Supabase Dashboard → SQL Editor**:
 
 ```sql
 create table users (
@@ -78,7 +168,7 @@ create table issue_labels (
 );
 ```
 
-Enable Row Level Security with permissive policies for the demo:
+Enable RLS with permissive policies for the demo:
 
 ```sql
 alter table users        enable row level security;
@@ -94,57 +184,40 @@ create policy "allow all" on labels       for all using (true);
 create policy "allow all" on issue_labels for all using (true);
 ```
 
-### 4. Enable Supabase Realtime
+### 4. Supabase: enable Realtime
 
-Supabase Realtime only delivers change events for tables explicitly added to the `supabase_realtime` publication.
-
-Run in **SQL Editor**:
+Supabase Realtime only fires for tables explicitly added to the `supabase_realtime` publication. Run:
 
 ```sql
 alter publication supabase_realtime add table issues;
 alter publication supabase_realtime add table issue_labels;
-alter publication supabase_realtime add table comments;
 ```
 
-**Why `issues` and `issue_labels` specifically:**
-- `issues` — status, priority, title, description, and assignee changes all happen here
-- `issue_labels` — adding or removing a label is an INSERT/DELETE on this join table, not a change to `issues`, so it requires its own subscription entry
+**Why both tables:**
+- `issues` — all field changes (status, priority, title, description, assignee) land here.
+- `issue_labels` — adding or removing a label is an INSERT/DELETE on this join table, not a change to `issues`. Without this entry, label changes produce no Realtime event.
 
-Without this step the Supabase JS client's `channel.on('postgres_changes', ...)` will subscribe without error but silently receive no events.
+Without this step, `channel.on('postgres_changes', ...)` subscribes silently but delivers nothing.
 
 ### 5. Seed test data (optional)
 
-Run `scripts/seed.sql` in Supabase SQL Editor to populate users, issues, labels, and comments.
+Run `scripts/seed.sql` in the Supabase SQL Editor to populate users, issues, labels, and sample comments.
 
-### 6. Fetch the GraphQL schema (optional)
-
-A `schema.graphql` is already committed — generated from the Supabase project used during development. It works as-is if your tables match the SQL in step 3.
-
-To regenerate from your own Supabase project:
-
-```bash
-npm run fetch-schema
-```
-
-This runs `scripts/fetch-schema.js`, which fetches the pg\_graphql introspection result via the GraphQL endpoint and writes the SDL directly to `schema.graphql` using `buildClientSchema` + `printSchema` from the `graphql` package. No extra tools required — only the two env variables from `.env.local`.
-
-### 7. Compile Relay artifacts
+### 6. Compile Relay artifacts
 
 ```bash
 npm run relay
 ```
 
-This generates all `__generated__/*.graphql.ts` files that the TypeScript compiler and React components need.
+Generates `__generated__/*.graphql.ts`. Must be re-run after changing any `graphql/` definition.
 
-### 8. Run the development server
-
-Run both in parallel (two terminals):
+### 7. Start the dev server
 
 ```bash
-# Terminal 1 — Relay compiler in watch mode
+# Terminal 1 — Relay compiler (watches graphql/ for changes)
 npm run relay:watch
 
-# Terminal 2 — Next.js dev server
+# Terminal 2 — Next.js
 npm run dev
 ```
 
@@ -152,162 +225,141 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## Relay + pg\_graphql: Problems and Solutions
+### Refresh the GraphQL schema (optional)
 
-This is the most nuanced part of the project. Below is a complete account of every non-obvious problem encountered and how it was solved.
+A `schema.graphql` is already committed — generated from the Supabase project used during development. It works as-is if your tables match step 3.
 
-### Problem 1 — `nodeId` instead of `id` as the global identifier
+To regenerate from your own project:
 
-Relay expects a field named `id: ID!` on every cacheable type. pg\_graphql implements the [Relay Global Object Identification spec](https://relay.dev/graphql/objectidentification.htm) but uses `nodeId` instead of `id`.
+```bash
+npm run fetch-schema
+```
 
-**Solution:** `nodeInterfaceIdField` in the Relay compiler config:
+This runs `scripts/fetch-schema.js`, which fetches the pg\_graphql introspection result and writes SDL to `schema.graphql` using `buildClientSchema` + `printSchema` from the `graphql` package. No extra tooling required.
+
+---
+
+## Relay + pg\_graphql Integration
+
+This is the most complex part of the project. `pg_graphql` exposes a valid GraphQL API, but it diverges from hand-written schemas in ways that break Relay's default assumptions. Below is a full account of each problem and how it is handled.
+
+### 1. `nodeId` vs `id` as the global identifier
+
+Relay requires a field named `id: ID!` on every cacheable object. `pg_graphql` implements the [Relay Global Object Identification spec](https://relay.dev/graphql/objectidentification.htm) but uses `nodeId` as the field name.
+
+**Fix:** `relay.config.js` tells the compiler to treat `nodeId` as the identity field:
 
 ```js
-// relay.config.js
-module.exports = {
-  schemaConfig: {
-    nodeInterfaceIdField: 'nodeId',
-    nodeInterfaceIdVariableName: 'nodeId',
-  },
+schemaConfig: {
+  nodeInterfaceIdField: 'nodeId',
+  nodeInterfaceIdVariableName: 'nodeId',
 }
 ```
 
-### Problem 2 — pg\_graphql naming conventions (`inflect_names = false`)
+**Important side effect:** `nodeId` is a computed base64 value, not a real column. pg\_graphql exposes it in filter inputs (`nodeId: IDFilter`) but cannot actually use it to match rows in UPDATE or DELETE — the filter returns `records: []` with no error. All mutations in this project therefore use `filter: { id: { eq: $id } }` with the real UUID primary key.
 
-With `inflect_names = false` (the Supabase default), pg\_graphql generates names that differ from typical hand-written schemas:
+### 2. Naming conventions (`inflect_names = false`)
 
-| Convention | pg\_graphql | Typical |
+The Supabase default (`inflect_names = false`) generates names directly from Postgres identifiers:
+
+| What | pg\_graphql name | Conventional name |
 |---|---|---|
 | Query field | `issuesCollection` | `issues` |
 | Relation field | `issue_labelsCollection` | `issueLabels` |
 | Update mutation | `updateissuesCollection` | `updateIssue` |
-| Insert mutation | `insertIntoissue_labelsCollection` | `addLabel` |
+| Insert mutation | `insertIntoissue_labelsCollection` | `addIssueLabel` |
 
-**Solution:** Write all operations using pg\_graphql's exact conventions. The committed `schema.graphql` reflects these so the Relay compiler validates against them correctly.
+The project intentionally uses the exact field and mutation names that proved to work against the current pg\_graphql runtime and Relay query transformation flow, even when they differ from more conventional GraphQL naming expectations. All GraphQL operations are written using these exact names; the committed `schema.graphql` reflects them so the Relay compiler validates them.
 
-### Problem 3 — Turbopack does not support `babel-plugin-relay`
+### 3. Turbopack does not support `babel-plugin-relay`
 
-Relay requires a compile-time transform that replaces `` graphql`...` `` tags with `require()` calls to pre-compiled artifacts. The official transform is `babel-plugin-relay`, which Turbopack (the default for `next dev` in Next.js 15+) does not support.
+Relay's standard setup uses `babel-plugin-relay` to transform `` graphql`...` `` tags at build time. Turbopack (the Next.js 15+ default) does not run Babel plugins.
 
-**Solution:** Keep Turbopack and import pre-compiled artifacts directly:
+**Fix:** Import pre-compiled artifacts directly. Fragment/query/mutation definitions live in `graphql/*.ts` as relay-compiler source; components import the compiled artifacts from `__generated__/`:
 
 ```ts
-// Instead of relying on the babel transform:
+// components/issues/IssueListItem.tsx
 import IssueListItemIssueNode from '@/__generated__/IssueListItem_issue.graphql'
-const data = useFragment(IssueListItemIssueNode, issueRef)
+
+const issue = useFragment(IssueListItemIssueNode, issueRef)
 ```
 
-Fragment definitions live in `graphql/*.ts` files (relay-compiler source only, never imported at runtime). Components import from `__generated__/` directly. This is semantically identical to what `babel-plugin-relay` would produce and works with any bundler.
+This is semantically identical to what `babel-plugin-relay` would produce and works with any bundler.
 
-### Problem 4 — pg\_graphql does not resolve nested fragment spreads
+### 4. pg\_graphql does not resolve nested fragment spreads
 
-Relay generates query text where fragments spread other fragments (e.g. `IssueList_query` spreads `IssueListItem_issue`). pg\_graphql only resolves fragment spreads one level deep, causing `no fragment named IssueListItem_issue on type issues` errors at runtime.
+Relay generates query text where fragment A spreads fragment B (e.g. `IssueList_query` spreads `IssueListItem_issue`). pg\_graphql only resolves one level of named fragment spreads, causing errors like `no fragment named IssueListItem_issue on type issues`.
 
-**Solution:** Pre-process the query text in the network layer before sending to Supabase. Every named fragment spread is replaced with an inline fragment, and named fragment definitions are stripped:
+**Fix:** `lib/relay/network.ts` — `inlineAllFragments` pre-processes query text before it is sent to Supabase. Every named fragment spread is recursively replaced with an inline fragment; named fragment definitions are stripped from the document.
 
-```ts
-// lib/relay/network.ts
-function inlineAllFragments(queryText: string): string {
-  const doc = parse(queryText)
-  const frags = buildFragmentMap(doc)
-  const flatDefs = doc.definitions
-    .filter(d => d.kind !== 'FragmentDefinition')
-    .map(def => inlineSelectionsDeep(def, frags))
-  return print({ kind: 'Document', definitions: flatDefs })
-}
-```
+### 5. `__typename` casing mismatch
 
-### Problem 5 — `__typename` casing mismatch
+`pg_graphql` with `inflect_names = false` returns lowercase `__typename` values (`"issues"`, `"comments"`) while Relay's store expects PascalCase (`"Issues"`, `"Comments"`) to match the schema type names. Mismatches cause `RelayModernRecord` to warn and discard the update.
 
-pg\_graphql with `inflect_names = false` returns lowercase `__typename` values (e.g. `"issues"`) while Relay's store expects PascalCase (`"Issues"`) matching the schema type names.
-
-**Solution:** Normalize all `__typename` values in the network layer after receiving the response:
+**Fix:** `lib/relay/network.ts` — `normalizeTypenames` walks the raw JSON response and rewrites `__typename` values using a static map before Relay processes it:
 
 ```ts
 const TYPENAME_MAP: Record<string, string> = {
-  issues: 'Issues', users: 'Users', comments: 'Comments',
-  labels: 'Labels', issue_labels: 'IssueLabels',
-}
-
-function normalizeTypenames(data: unknown): unknown {
-  // recursively walk JSON, rewrite __typename values
+  issues: 'Issues', users: 'Users', labels: 'Labels',
+  comments: 'Comments', issue_labels: 'IssueLabels',
 }
 ```
 
-### Problem 6 — Typed inline fragments inside `node()` queries
+### 6. Type conditions on inline fragments must be lowercased
 
-When type conditions are kept in inline fragments sent to pg\_graphql (e.g. `... on Issues { ... }`), pg\_graphql fails because its runtime uses lowercase type names (`issues`, not `Issues`). However, completely removing type conditions breaks `node(nodeId: ...)` refetch queries, because pg\_graphql needs the type condition to know which table to resolve sub-fields from.
+When `inlineAllFragments` replaces `...FragmentName` with `... on TypeName { ... }`, the type condition must use the lowercase table name (`issues`, not `Issues`) because that is what pg\_graphql's runtime checks against. But completely stripping type conditions breaks sub-relation resolution in some contexts.
 
-**Solution:** Keep type conditions but lowercase them before sending:
+**Fix:** Type conditions are kept but lowercased. The one exception is `Query` (the root type): pg\_graphql silently ignores `... on Query { }` inside a query operation, so that type condition is stripped entirely to ensure root-level fields are inlined without wrapping.
 
 ```ts
-function lowerTypeCondition(typeCondition) {
+function lowerTypeCondition(typeCondition: NamedTypeNode | null | undefined) {
   if (!typeCondition) return undefined
   const name = typeCondition.name.value
-  if (name === 'Query' || name === 'query') return undefined // root type: no condition needed
-  return { ...typeCondition, name: { value: name.toLowerCase() } }
+  if (name === 'Query' || name === 'query') return undefined
+  return { ...typeCondition, name: { ...typeCondition.name, value: name.toLowerCase() } }
 }
 ```
 
-This makes `... on Issues { commentsCollection }` become `... on issues { commentsCollection }`, which pg\_graphql resolves correctly. `normalizeTypenames` handles the reverse direction in responses.
+### 7. Relay pagination via `node()` fails for sub-relations
 
-### Problem 7 — Relay pagination refetch via `node()` fails with sub-relations
+Relay's `@refetchable` on a non-root fragment (e.g. `fragment X on Issues`) generates a pagination query using `node(nodeId: ...)`. pg\_graphql's `node()` implementation does not correctly resolve collection sub-relations inside typed inline fragments on the returned object, producing `"Invalid input for NonNull type"` when `loadNext` is called.
 
-Relay's `@refetchable` on a non-root fragment (e.g. `on Issues`) generates pagination queries that use `node(nodeId: ...)` to re-fetch the parent record and then load the next page. pg\_graphql's `node()` implementation does not correctly resolve sub-relations (`commentsCollection`) inside typed inline fragments, returning `"Invalid input for NonNull type"`.
-
-**Solution:** Place the comments pagination fragment on `Query` instead of `Issues`, following the [pg\_graphql + Relay docs](https://supabase.github.io/pg_graphql/usage_with_relay/):
+**Fix:** The comment thread pagination fragment is anchored at `Query` instead of `Issues`:
 
 ```graphql
-# Works ✓ — generates a root-level refetch query, no node() lookup
 fragment CommentThread_query on Query
-@argumentDefinitions(issueId: { type: "UUID!" }, ...)
+@argumentDefinitions(issueId: { type: "UUID!" }, first: { type: "Int", defaultValue: 10 }, after: { type: "Cursor" })
 @refetchable(queryName: "CommentThreadPaginationQuery") {
-  commentsCollection(filter: { issue_id: { eq: $issueId } }, ...) @connection(key: "...") {
-    ...
+  commentsCollection(filter: { issue_id: { eq: $issueId } }, first: $first, after: $after, orderBy: [{ created_at: AscNullsLast }])
+  @connection(key: "CommentThread_commentsCollection") {
+    edges { node { nodeId ...CommentThread_comment } }
   }
 }
 ```
 
-### Problem 8 — Mutations: `nodeId` cannot be used as a filter value
+This generates a root-level refetch query (no `node()` lookup), which pg\_graphql handles correctly.
 
-Relay's `nodeId` is a **computed** field (a base64-encoded JSON string that pg\_graphql derives at query time from the primary key). It is exposed in `IssuesFilter` as `nodeId: IDFilter`, but in practice pg\_graphql cannot use it to match rows in an UPDATE or DELETE — the filter returns `records: []` and nothing is written to the database. Critically, pg\_graphql returns no error, so the mutation appears to succeed.
+### 8. Optimistic updater rollback
 
-**Solution:** Always filter mutations by the actual primary key column:
+The standard Relay `optimisticUpdater` pattern updates the store before the server responds and rolls back on error. With `pg_graphql`, mutation responses sometimes fail store normalization (due to the `__typename` casing issues described above), causing Relay to roll back the optimistic patch even on a successful mutation — a visible flicker.
 
-```graphql
-# Wrong — nodeId filter silently matches 0 rows
-mutation UpdateStatus($nodeId: ID!, $status: String!) {
-  updateissuesCollection(filter: { nodeId: { eq: $nodeId } }, set: { status: $status }) { ... }
-}
-
-# Correct — id is the real PK column
-mutation UpdateStatus($id: UUID!, $status: String!) {
-  updateissuesCollection(filter: { id: { eq: $id } }, set: { status: $status }) { ... }
-}
-```
-
-All mutations in this project use `id: UUID!` as the filter variable and pass `issue.id` from the fragment.
-
-### Problem 9 — Relay optimistic updates get rolled back
-
-The standard Relay pattern for immediate UI feedback is `optimisticUpdater`: mutate the store immediately and let Relay roll it back if the server returns an error. However, when the mutation response does not include a recognizable record (e.g. due to `__typename` not matching, or `records: []`), Relay rolls back the optimistic patch — causing a visible flicker even on successful mutations.
-
-**Solution:** Local component state for immediate feedback, with revert on `onError`:
+**Fix:** Local component state drives the UI immediately; Relay is not involved in the optimistic path. The state reverts via `onError` only if the server confirms failure. A `useEffect` in each component syncs the local state from the Relay fragment whenever the store is updated externally (e.g. after a Realtime-triggered refetch):
 
 ```ts
 const [localStatus, setLocalStatus] = useState(issue.status ?? 'OPEN')
 
+// Sync from store when Realtime refetch updates the fragment
+useEffect(() => { setLocalStatus(issue.status ?? 'OPEN') }, [issue.status])
+
 const handleStatusChange = (status: string) => {
   const prev = localStatus
-  setLocalStatus(status)              // ← immediate, no Relay involvement
+  setLocalStatus(status)                              // immediate
   commitStatus({
-    variables: { id: issue.id, status },
-    onError() { setLocalStatus(prev) }, // ← revert only on confirmed error
+    variables: { id: issue.id as string, status },
+    onError() { setLocalStatus(prev) },               // revert on confirmed error
   })
 }
 ```
-
-A `useEffect` syncs local state back from the Relay fragment whenever the store is updated externally (e.g. after a Realtime-triggered refetch from another tab).
 
 ---
 
@@ -315,132 +367,157 @@ A `useEffect` syncs local state back from the Relay fragment whenever the store 
 
 ### Client-only Relay environment
 
-The Relay environment lives entirely on the client. Server components (page files) are thin wrappers that render client component trees inside `<Suspense>`. This avoids the complexity of serializing Relay store records across the RSC boundary.
+The Relay environment runs entirely on the client. Next.js page files are thin RSC wrappers that render `<Suspense>` boundaries around client component trees. This avoids the complexity of serializing Relay store records across the RSC boundary for the initial render.
 
-**Alternative considered:** Server preloading — run `fetchQuery` in a server component, serialize the store as JSON, hydrate on the client before first render. This eliminates the loading skeleton on initial page load and is documented as a future improvement.
+The trade-off is a loading skeleton on first paint. The alternative — running `fetchQuery` on the server and hydrating from serialized store JSON — is the right long-term direction and is documented in Trade-offs.
 
-### Fragment co-location
+### Fragment co-location on the detail page
 
-Each section of the issue detail page declares its own Relay fragment:
+Each section of the detail page owns its own Relay fragment:
 
-- `IssueHeader_issue` — title, status, priority
-- `IssueDescription_issue` — description
-- `IssueSidebar_issue` — assignee, labels
-- `CommentThread_query` — paginated comments (on Query, see Problem 7)
+| Component | Fragment | Fields |
+|---|---|---|
+| `IssueHeader` | `IssueHeader_issue` | title, status, priority, created\_at |
+| `IssueDescription` | `IssueDescription_issue` | description |
+| `IssueSidebar` | `IssueSidebar_issue` | assignee\_id, users, issue\_labelsCollection |
+| `CommentThread` | `CommentThread_query` | paginated commentsCollection (on Query) |
 
-The top-level `IssueDetailContent_issue` fragment spreads the first three. Each component is self-contained: move it to another page and its data requirements come with it. No prop drilling of raw data.
+`IssueDetailContent_issue` spreads the first three. `CommentThread_query` is spread directly from `IssueDetailQuery` at the root (required by the `node()` limitation described above).
 
-### Real-time synchronization
+### Real-time update flow
 
-**List page:** A single Supabase Realtime channel subscribed to `issues` and `issue_labels` triggers a Relay `refetch` of the connection on any change. The subscription is created once on mount; `useRef` avoids the stale-closure problem that would occur if the handler directly captured `refetch` or `filters` from the render closure.
+**Issue list:** One Supabase Realtime channel subscribes to `postgres_changes` on both `issues` and `issue_labels`. Any event triggers a `refetch` of the Relay connection with the current filters. The subscription is set up once on mount; `useRef` holds the latest `refetch` function and `filters` object to avoid the stale-closure bug that would occur if the event handler captured them directly from the render closure.
 
-**Detail page:** A Supabase Realtime channel subscribed to the specific issue row increments a `fetchKey` state variable, causing `useLazyLoadQuery` to re-fetch in the background (`store-and-network` keeps current data visible during the request). A `useEffect` in each detail component syncs local state from the updated fragment data when the fetch completes.
+**Issue detail:** A Supabase Realtime channel subscribes to `UPDATE` events on the specific issue row (`filter: id=eq.${id}`). Each event increments a `fetchKey` state variable, causing `useLazyLoadQuery` to re-fetch in the background while `store-and-network` keeps current data visible. When the fetch resolves, the `useEffect` hooks in each section component sync their local state from the updated fragment data.
 
 ### Cursor-based pagination
 
-The issue list uses `usePaginationFragment` with `@connection` and `@refetchable` on a `Query`-level fragment. Comment pagination uses the same pattern, anchored at `Query` (not `Issues`) to avoid the `node()` refetch limitation documented in Problem 7.
+Issue list: `usePaginationFragment` with `@connection` and `@refetchable` on a `Query`-level fragment, driving a "Load more" button.
+
+Comment thread: same pattern, also on `Query` (not `Issues`) to avoid the pg\_graphql `node()` limitation.
 
 ---
 
-## Trade-offs and What I Would Do With More Time
+## Trade-offs
 
-### Authentication
+### Label filtering is client-side
 
-No auth layer — all queries use the Supabase anon key with permissive RLS. In production: add Supabase Auth, pass the user JWT in `Authorization`, tighten RLS to user-scoped policies.
+Status and priority filters are applied in the GraphQL query (`filter: { status: $statusFilter, priority: $priorityFilter }`). Label filtering happens in JavaScript after the fetch.
 
-### Server-side rendering of initial data
-
-The first meaningful paint requires a round trip from the browser. With the RSC preloading pattern (server runs `fetchQuery`, client hydrates from serialized store records) the initial HTML would already contain data.
-
-### Label filtering at the database level
-
-Label filtering is applied client-side after fetching all issues. The correct approach is a pg\_graphql relationship filter:
+The intended server-side approach would be a relationship sub-filter:
 
 ```graphql
 filter: { issue_labelsCollection: { some: { label_id: { in: $labelIds } } } }
 ```
 
-The exact filter syntax for collection relationships varies by pg\_graphql version. Client-side filtering was chosen to avoid a runtime surprise; the correct approach is documented here.
+In the version of `pg_graphql` used here, `issuesFilter` does not expose `issue_labelsCollection` as a filterable field — attempting to use it returns `Input for type issuesFilter contains extra keys ["issue_labelsCollection"]` at runtime. Client-side filtering was chosen as the safe workaround. Newer versions of pg\_graphql may support this syntax; the correct query is documented above for when it becomes available.
 
-### Comment updates from other users
+The practical cost: all issues matching the other active filters are fetched before the label filter is applied in JS. For a small dataset this is negligible; at scale, server-side filtering would be necessary.
 
-The Realtime subscription currently does not include the `comments` table. New comments from other users only appear after a page refresh. Adding `alter publication supabase_realtime add table comments` and a subscription in `CommentThread` would close this gap.
+### Local state instead of Relay store mutations for optimistic UI
 
-### `nodeId` computation from raw UUID
+The typical Relay `optimisticUpdater` / `optimisticResponse` pattern proved unreliable with `pg_graphql` due to `__typename` casing and normalized record mismatches. Local component state was chosen as the optimistic UI mechanism — it is simpler, fully predictable, and does not depend on Relay store normalization working correctly for every field type.
 
-Supabase Realtime payloads contain the UUID but not the Relay `nodeId`. The `nodeId` can be computed deterministically:
+### Detail page Realtime is a supplementary enhancement
 
-```ts
-// pg_graphql encodes nodeId as base64(JSON.stringify(["public", "TableName", { id: uuid }]))
-const nodeId = btoa(JSON.stringify(['public', 'Issues', { id: uuid }]))
-```
+The detail page Realtime subscription was added to reflect cross-tab edits (e.g. another user changes the status in a different tab). Mutations made on the same page are already reflected immediately via local state. The Realtime subscription would matter in a multi-user scenario; for a demo it is mainly visible when the same issue is open in two browser tabs.
 
-This would enable targeted O(1) Relay store patches on Realtime events rather than a full refetch.
+### No Realtime for new comments from other users
 
-### Zod for filter validation
+The `comments` table is not in the Realtime subscription. Comments posted by the current user appear immediately (via local state append); comments posted by another user in a different tab require a page refresh. Closing this gap requires adding `comments` to the publication and a subscription in `CommentThread`.
 
-`zod` is in `package.json` (from the original requirements spec) but is not currently used. The intended use was to validate filter values at the UI boundary before they become GraphQL variables. With more time, `IssueFilters.tsx` would parse the filter state through a Zod schema before passing it to `usePaginationFragment`, making invalid filter combinations impossible to propagate.
+### Zod not yet wired up
 
-### `babel-plugin-relay` in devDependencies
+`zod` is in `package.json` per the requirements spec. The intended use is validation of filter inputs at the `IssueFilters` boundary before they become GraphQL variables. It was not implemented within the time available.
 
-`babel-plugin-relay` is listed in `devDependencies` because it was the originally intended Relay transform. It is not active — see Problem 3 above for why it was replaced by direct artifact imports. It can be removed safely; it is kept as documentation of the considered approach.
+### No authentication
 
-### Testing
+All requests use the Supabase anon key with permissive RLS (`for all using (true)`). In a real application: Supabase Auth, user JWT in the `Authorization` header, row-level policies scoped to the authenticated user.
 
-No tests were written. Ideal test pyramid:
-- Unit tests for pure helpers (`inlineAllFragments`, `normalizeTypenames`, filter builders)
-- Relay `MockEnvironment` tests for components (avoids network in tests)
-- Playwright E2E for the critical paths (list → detail → edit → comment)
+### No tests
+
+No unit, integration, or E2E tests. Priority was on demonstrating the Relay + pg\_graphql integration. A solid test plan would include:
+- Unit tests for `inlineAllFragments` and `normalizeTypenames` (pure functions, easy to test in isolation)
+- Component tests with Relay `MockEnvironment`
+- Playwright E2E for the main flows (list → filter → detail → edit → comment)
 
 ---
 
-## Project Structure
+## Manual Verification
+
+### Issue list
+
+1. Open [http://localhost:3000/issues](http://localhost:3000/issues)
+2. Confirm issues appear with title, status badge, priority icon, labels, assignee avatar
+3. Click "Load more" — confirm next page appends below without full reload
+
+### Filters
+
+1. Click **Status** — select one or more; list narrows immediately
+2. Click **Priority** — same
+3. Click **Labels** — list is filtered client-side; badge count updates
+4. Click **Clear filters** — list resets
+
+### Detail editing
+
+1. Click any issue title to open detail page
+2. **Title:** click the title text → type → Enter to save, Esc to cancel
+3. **Description:** click the description area → type → ⌘↵ to save, Esc to cancel
+4. **Status:** click the status badge → pick a new status → updates immediately
+5. **Priority:** click the priority badge → pick new value → updates immediately
+6. **Assignee:** click the assignee area → pick a user or Unassign
+7. **Labels:** click "Edit labels…" → toggle labels on/off → changes are immediate
+
+For each edit: confirm the value persists after refreshing the page.
+
+### Comments
+
+1. On a detail page, type a comment and press ⌘↵ or click **Comment**
+2. Confirm the comment appears immediately below (local append)
+3. If there are more than 10 comments, confirm "↑ Load earlier comments" appears and works
+
+### Real-time (two tabs)
+
+1. Open the issue list in **Tab A** and **Tab B**
+2. In Tab A, open an issue and change its **status** — confirm Tab B updates within ~1–2 seconds
+3. Back on the detail page in Tab A, add or remove a **label** — confirm Tab B reflects the label change without refreshing (requires `issue_labels` in the Realtime publication)
+
+### Optimistic rollback
+
+All field edits update immediately in the UI before the server responds. To observe the rollback:
+1. Open the detail page
+2. Temporarily set `NEXT_PUBLIC_SUPABASE_ANON_KEY` to an invalid value and reload
+3. Try changing the status — the badge updates instantly, then reverts when the mutation error is received
+4. A toast error message confirms the failure
+
+---
+
+## Deployment
+
+The project is configured for deployment to Vercel.
+
+### Deploy to Vercel
+
+```bash
+# Install Vercel CLI if needed
+npm i -g vercel
+
+vercel deploy
+```
+
+Or connect the repository in the Vercel dashboard and deploy from there.
+
+### Required environment variables on Vercel
+
+Set the following in **Vercel Dashboard → Project → Settings → Environment Variables**:
 
 ```
-issue-tracker/
-├── relay.config.js             # Relay compiler config (nodeInterfaceIdField, nodeInterfaceIdVariableName)
-├── schema.graphql              # pg_graphql schema (committed; regenerate with npm run fetch-schema)
-├── scripts/
-│   ├── fetch-schema.js         # Introspection → schema.graphql
-│   └── seed.sql                # Test data
-├── lib/
-│   ├── relay/
-│   │   ├── network.ts          # fetchGraphQL → inlineAllFragments → normalizeTypenames
-│   │   └── environment.ts      # Relay Environment singleton
-│   └── supabase.ts             # Supabase JS client (for Realtime subscriptions)
-├── graphql/                    # relay-compiler source (never imported at runtime)
-│   ├── IssueList.ts            # IssueListQuery, IssueList_query, IssueListStatusMutation
-│   ├── IssueDetail.ts          # IssueDetailQuery, IssueDetailContent_issue
-│   ├── IssueHeader.ts          # IssueHeader_issue, Title/Priority/StatusMutation
-│   ├── IssueDescription.ts     # IssueDescription_issue, IssueDescriptionMutation
-│   ├── IssueSidebar.ts         # IssueSidebar_issue, Assignee/Label mutations, Users/LabelsQuery
-│   └── CommentThread.ts        # CommentThread_query (on Query), CommentThread_comment
-├── components/
-│   ├── providers/
-│   │   ├── RelayProvider.tsx
-│   │   └── ToastProvider.tsx
-│   ├── issues/
-│   │   ├── IssueList.tsx       # Realtime subscription, pagination, filter
-│   │   ├── IssueListItem.tsx   # Local status state + fragment sync
-│   │   ├── IssueFilters.tsx
-│   │   ├── IssueDetail.tsx     # Realtime subscription (fetchKey), Suspense boundary
-│   │   ├── IssueHeader.tsx     # Local state for title/status/priority + fragment sync
-│   │   ├── IssueDescription.tsx# Local state for description + fragment sync
-│   │   ├── IssueSidebar.tsx    # Local state for assignee/labels + fragment sync
-│   │   ├── CommentThread.tsx   # usePaginationFragment, local comment append
-│   │   └── CommentForm.tsx     # insertIntocommentsCollection mutation
-│   └── ui/
-│       ├── StatusBadge.tsx
-│       ├── PriorityBadge.tsx
-│       ├── Avatar.tsx
-│       └── Skeleton.tsx
-├── hooks/
-│   └── useToast.ts
-├── app/
-│   ├── layout.tsx
-│   ├── page.tsx                # redirect → /issues
-│   └── issues/
-│       ├── page.tsx            # Issue list page
-│       └── [id]/page.tsx       # Issue detail page
-└── __generated__/              # Relay compiler output (do not edit manually)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
+
+The `build` script (`relay-compiler && next build`) runs the Relay compiler before the Next.js build, so pre-compiled artifacts are always up to date in the deployment.
+
+### Live demo
+
+https://issue-tracker-sigma-one.vercel.app/issues
