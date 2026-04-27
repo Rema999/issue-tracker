@@ -23,8 +23,7 @@ export function CommentForm({ issueId, onCommentPosted }: Props) {
   const [commitMutation, isInFlight] = useMutation<MutationType>(CommentFormMutationNode)
   const { addToast } = useToast()
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  const submitComment = () => {
     const trimmed = body.trim()
     if (!trimmed) return
 
@@ -51,6 +50,11 @@ export function CommentForm({ issueId, onCommentPosted }: Props) {
     })
   }
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    submitComment()
+  }
+
   return (
     <form onSubmit={handleSubmit} className="flex gap-3">
       <div className="flex-1">
@@ -58,9 +62,7 @@ export function CommentForm({ issueId, onCommentPosted }: Props) {
           value={body}
           onChange={(e) => setBody(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              handleSubmit(e as unknown as React.FormEvent)
-            }
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitComment()
           }}
           placeholder="Leave a comment… (⌘↵ to submit)"
           rows={3}
