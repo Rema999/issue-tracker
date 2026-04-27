@@ -1,28 +1,48 @@
 'use client'
 
-import { useFragment } from 'react-relay'
+import { useFragment, useMutation } from 'react-relay'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Avatar } from '@/components/ui/Avatar'
 import { StatusBadge, STATUS_OPTIONS } from '@/components/ui/StatusBadge'
 import { PriorityBadge } from '@/components/ui/PriorityBadge'
+import { useToast } from '@/hooks/useToast'
 import type { IssueListItem_issue$key } from '@/__generated__/IssueListItem_issue.graphql'
+import type { IssueListStatusMutation as StatusMutationType } from '@/__generated__/IssueListStatusMutation.graphql'
 import IssueListItemIssueNode from '@/__generated__/IssueListItem_issue.graphql'
+import IssueListStatusMutationNode from '@/__generated__/IssueListStatusMutation.graphql'
 
 interface Props {
   issueRef: IssueListItem_issue$key
-  onStatusChange?: (newStatus: string) => void
 }
 
-export function IssueListItem({ issueRef, onStatusChange }: Props) {
+export function IssueListItem({ issueRef }: Props) {
   const issue = useFragment(IssueListItemIssueNode, issueRef)
+  const { addToast } = useToast()
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [localStatus, setLocalStatus] = useState(issue.status ?? 'OPEN')
+  const [commitStatus] = useMutation<StatusMutationType>(IssueListStatusMutationNode)
 
   // Keep local status in sync when the Relay store is updated externally
   // (e.g. after a Realtime-triggered refetch from another tab).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setLocalStatus(issue.status ?? 'OPEN') }, [issue.status])
+
+  // Co-located with localStatus so the revert on onError works correctly.
+  // The parent pattern (mutation in IssueList, state in IssueListItem) has no
+  // path to call setLocalStatus(prev) when the mutation fails.
+  const handleStatusChange = (newStatus: string) => {
+    const prev = localStatus
+    setLocalStatus(newStatus)
+    setShowStatusMenu(false)
+    commitStatus({
+      variables: { id: issue.id as string, status: newStatus },
+      onError() {
+        setLocalStatus(prev)
+        addToast('Failed to update status — change reverted.', 'error')
+      },
+    })
+  }
 
   const labels =
     issue.issue_labelsCollection?.edges
@@ -71,17 +91,14 @@ export function IssueListItem({ issueRef, onStatusChange }: Props) {
       {/* Status badge with quick-change popover */}
       <div className="relative shrink-0">
         <button
-          onClick={(e) => {
-            e.preventDefault()
-            if (onStatusChange) setShowStatusMenu((v) => !v)
-          }}
-          className={onStatusChange ? 'cursor-pointer' : 'cursor-default'}
-          title={onStatusChange ? 'Change status' : undefined}
+          onClick={(e) => { e.preventDefault(); setShowStatusMenu((v) => !v) }}
+          className="cursor-pointer"
+          title="Change status"
         >
           <StatusBadge status={localStatus} size="sm" />
         </button>
 
-        {showStatusMenu && onStatusChange && (
+        {showStatusMenu && (
           <>
             <div
               className="fixed inset-0 z-20"
@@ -92,11 +109,7 @@ export function IssueListItem({ issueRef, onStatusChange }: Props) {
                 <button
                   key={s}
                   className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                  onClick={() => {
-                    setLocalStatus(s)
-                    setShowStatusMenu(false)
-                    onStatusChange(s)
-                  }}
+                  onClick={() => handleStatusChange(s)}
                 >
                   <StatusBadge status={s} size="sm" />
                 </button>

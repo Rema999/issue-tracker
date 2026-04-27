@@ -9,6 +9,13 @@ const nextConfig: NextConfig = {
     // or, if watchman is installed:
     //   npm run relay:watch
 
+  // Explicitly set the Turbopack workspace root to this directory.
+  // Without this, Turbopack may pick up a package-lock.json from a parent
+  // directory and use that as the root, causing .env.local to be missed.
+  turbopack: {
+    root: __dirname,
+  },
+
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'api.dicebear.com' },

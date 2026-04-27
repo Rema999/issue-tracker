@@ -1,24 +1,21 @@
 'use client'
 
-import { useLazyLoadQuery, usePaginationFragment, useMutation } from 'react-relay'
-import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
+import { useLazyLoadQuery, usePaginationFragment } from 'react-relay'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { IssueListItem } from './IssueListItem'
 import { IssueFilters, type FilterValues } from './IssueFilters'
-import { useToast } from '@/hooks/useToast'
 import { supabase } from '@/lib/supabase'
 
 // Pre-compiled Relay artifacts — imported directly for Turbopack compatibility.
 // Fragment/query/mutation definitions live in graphql/ directory (relay-compiler source).
 import IssueListQueryNode from '@/__generated__/IssueListQuery.graphql'
 import IssueListQueryFragmentNode from '@/__generated__/IssueList_query.graphql'
-import IssueListStatusMutationNode from '@/__generated__/IssueListStatusMutation.graphql'
 
 import type { IssueListQuery as IssueListQueryType } from '@/__generated__/IssueListQuery.graphql'
 import type {
   IssueList_query$key,
   IssueList_query$data,
 } from '@/__generated__/IssueList_query.graphql'
-import type { IssueListStatusMutation as IssueStatusMutationType } from '@/__generated__/IssueListStatusMutation.graphql'
 
 type IssueEdgeNode = NonNullable<
   NonNullable<IssueList_query$data['issuesCollection']>['edges'][number]['node']
@@ -41,10 +38,7 @@ function IssueListInner({
   const { data, loadNext, isLoadingNext, hasNext, refetch } =
     usePaginationFragment(IssueListQueryFragmentNode, queryRef)
 
-  const { addToast } = useToast()
   const [, startTransition] = useTransition()
-
-  const [commitStatus] = useMutation<IssueStatusMutationType>(IssueListStatusMutationNode)
 
   const allIssues = data.issuesCollection?.edges ?? []
 
@@ -96,19 +90,6 @@ function IssueListInner({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Optimistic status change with automatic rollback ──────────────────────────
-  const handleStatusChange = useCallback(
-    (id: string, newStatus: string) => {
-      commitStatus({
-        variables: { id, status: newStatus },
-        onError() {
-          addToast('Failed to update status — change reverted.', 'error')
-        },
-      })
-    },
-    [commitStatus, addToast],
-  )
-
   return (
     <div className="min-h-[50vh]">
       <IssueFilters filters={filters} labels={labels} onChange={onFilterChange} />
@@ -129,9 +110,6 @@ function IssueListInner({
             <IssueListItem
               key={node.nodeId}
               issueRef={node}
-              onStatusChange={(newStatus) =>
-                handleStatusChange(node.id as string, newStatus)
-              }
             />
           ))}
         </div>
