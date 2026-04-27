@@ -402,17 +402,19 @@ Comment thread: same pattern, also on `Query` (not `Issues`) to avoid the pg\_gr
 
 ### Label filtering is client-side
 
-Status and priority filters are applied in the GraphQL query (`filter: { status: $statusFilter, priority: $priorityFilter }`). Label filtering happens in JavaScript after the fetch.
+Status and priority filters are applied server-side in the GraphQL query (`filter: { status: $statusFilter, priority: $priorityFilter }`). Label filtering happens in JavaScript after the fetch.
 
-The intended server-side approach would be a relationship sub-filter:
+The generated schema and introspection output suggested that relation-based filtering should be available — `IssuesFilter` exposes `issue_labelsCollection: IssueLabelsFilter`, and `IssueLabelsFilter` exposes `label_id: UUIDFilter` with an `in` operator. The natural server-side query shape would be:
 
 ```graphql
-filter: { issue_labelsCollection: { some: { label_id: { in: $labelIds } } } }
+filter: { issue_labelsCollection: { label_id: { in: $labelIds } } }
 ```
 
-In the version of `pg_graphql` used here, `issuesFilter` does not expose `issue_labelsCollection` as a filterable field — attempting to use it returns `Input for type issuesFilter contains extra keys ["issue_labelsCollection"]` at runtime. Client-side filtering was chosen as the safe workaround. Newer versions of pg\_graphql may support this syntax; the correct query is documented above for when it becomes available.
+In practice, this shape was rejected at query execution time by the current Supabase/pg_graphql setup with `Input for type issuesFilter contains extra keys ["issue_labelsCollection"]`. The introspection schema and the runtime query validator were out of sync. Rather than treat this as a hard platform limitation, client-side filtering was chosen as a stable, predictable workaround for the current setup.
 
-The practical cost: all issues matching the other active filters are fetched before the label filter is applied in JS. For a small dataset this is negligible; at scale, server-side filtering would be necessary.
+The practical cost: all issues matching the other active filters are fetched, then the label filter is applied in JS. For the dataset size in this project this is negligible.
+
+**Next steps if server-side label filtering is needed:** upgrade `pg_graphql` to a version where this query shape is validated consistently, or expose a Postgres view/function that performs the label join server-side and surface it as a dedicated GraphQL field.
 
 ### Local state instead of Relay store mutations for optimistic UI
 
