@@ -64,6 +64,7 @@ export function IssueListItem({ issueRef }: Props) {
       {/* Title link */}
       <Link
         href={`/issues/${issue.id}`}
+        prefetch={false}
         className="flex-1 min-w-0 text-sm font-medium text-slate-800 hover:text-blue-600 truncate transition-colors"
       >
         {issue.title}
